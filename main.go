@@ -14,6 +14,19 @@ type Server struct {
 	listener net.Listener
 }
 
+type Client struct {
+	conn net.Conn
+	incomingBuffer []byte
+	incomingReadPos int
+	incomingWritePos int
+
+	outgoingWriter *bufio.Writer
+}
+
+const incomingBufferSize = 4096
+const outgoingBufferSize = 4096
+const maxHeaderSize = 2048
+
 const NaiveParserHeaderText = 1
 const NaiveParserHeaderStartLF = 2
 const NaiveParserHeaderStart = 3
@@ -52,23 +65,35 @@ func consume(input byte, state int) (int, error) {
 	return NaiveParserGood, fmt.Errorf("Invalid request parser state")
 }
 
-func (p *Server) parse(incomingBuffer []byte, conn net.Conn) error {
+func (c *Client) readRequest() error {
 	var err error
 	state := NaiveParserHeaderText
-	incomingReadPos := 0
-	incomingWritePos := 0
+	incomingBuffer := c.incomingBuffer
+	incomingReadPos := c.incomingReadPos
+	incomingWritePos := c.incomingWritePos
+	if incomingReadPos == incomingWritePos {
+		// If possible, start reading from the buffer beginning
+		incomingReadPos = 0
+		incomingWritePos = 0
+	}
+	if incomingReadPos + maxHeaderSize > len(incomingBuffer) {
+		// Inplace fragments cannot be circular, if in doubt, defragment
+		incomingWritePos = copy(incomingBuffer[incomingReadPos:incomingWritePos], incomingBuffer)
+		incomingReadPos = 0
+	}
+	headerLimit := incomingReadPos + maxHeaderSize // Always <= len(incomingBuffer)
 
 	for state != NaiveParserGood {
+		if incomingReadPos == headerLimit {
+			return fmt.Errorf("Too big request headers")
+		}
 		if incomingReadPos == incomingWritePos {
-			if incomingWritePos == len(incomingBuffer) {
-				return fmt.Errorf("Too big request headers")
-			}
-			n, err := conn.Read(incomingBuffer[incomingWritePos:])
+			n, err := c.conn.Read(incomingBuffer[incomingWritePos:])
 			if err != nil {
 				return err
 			}
 			if n == 0 {
-				continue // TODO why
+				continue // TODO can this happen? Why?
 			}
 			incomingWritePos += n
 		}
@@ -78,19 +103,18 @@ func (p *Server) parse(incomingBuffer []byte, conn net.Conn) error {
 		}
 		incomingReadPos++
 	}
+	c.incomingReadPos = incomingReadPos
+	c.incomingWritePos = incomingWritePos
 	return nil
 }
 
-func (s *Server) routine(conn net.Conn) {
-	const bufSize = 4096
-	incomingBuffer := make([]byte, bufSize)
-
-	wr := bufio.NewWriterSize(conn, bufSize)
+func (c *Client) routine() {
 	for {
-		err := s.parse(incomingBuffer, conn)
+		err := c.readRequest()
 		if err != nil {
 			return
 		}
+		wr := c.outgoingWriter
 		_, _ = wr.WriteString("HTTP/1.1 200 OK\r\n")
 		_, _ = wr.WriteString("date: Thu, 26 Nov 2020 19:32:13 GMT\r\n")
 		_, _ = wr.WriteString("server: crab\r\n")
@@ -113,11 +137,16 @@ func (s *Server) ListerAndServer(addr string) error {
 		if err != nil {
 			return err
 		}
-		go s.routine(conn)
+		client := &Client{
+			conn:conn,
+			incomingBuffer: make([]byte, incomingBufferSize),
+			outgoingWriter: bufio.NewWriterSize(conn, outgoingBufferSize),
+		}
+		go client.routine()
 	}
 }
 
-var queryKeyBytes = []byte("query") // SQL query in form 'SELECT ... FROM ...'
+var queryKeyBytes = []byte("query")
 
 func requestHandler(ctx *fasthttp.RequestCtx) {
 	args := ctx.QueryArgs()
@@ -156,10 +185,11 @@ func slow() {
 	log.Fatal(http.ListenAndServe(":7003", nil))
 }
 
-//          2s         20s
-// fast:  235335     132181
-// slow:  112336     61513
-// naive: 320302     180053
+//       Thinkpad  Thinkpad   Macbook Pro
+//          2s         20s       5s
+// fast:  235335     132181    38148
+// slow:  112336     61513     24829
+// naive: 320302     180053    43505
 
 func main() {
 	s := Server{}
