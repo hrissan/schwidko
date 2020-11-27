@@ -473,20 +473,26 @@ func (c *Client) readRequest() error {
 	if err := c.readComplete(); err != nil {
 		return err
 	}
-	state := METHOD_START
-	incomingReadPos := c.incomingReadPos
-	incomingBuffer := c.incomingBuffer
-	for {
-		state = c.consume(incomingBuffer, incomingReadPos, state)
-		if state == GOOD {
-			break
-		}
-		if state == BAD {
-			return errors.New(c.parseError)
-		}
-		incomingReadPos++
+	str := c.parse2()
+	if str != "" {
+		return errors.New(str)
 	}
-	c.incomingReadPos = incomingReadPos
+	/*
+			state := METHOD_START
+			incomingReadPos := c.incomingReadPos
+			incomingBuffer := c.incomingBuffer
+			for {
+				state = c.consume(incomingBuffer, incomingReadPos, state)
+				if state == GOOD {
+					break
+				}
+				if state == BAD {
+					return errors.New(c.parseError)
+				}
+				incomingReadPos++
+			}
+		c.incomingReadPos = incomingReadPos
+	*/
 	return nil
 }
 
