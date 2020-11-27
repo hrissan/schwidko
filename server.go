@@ -342,9 +342,9 @@ func (c *Client) readRequest() error {
 	}
 	headerLimit := incomingReadPos + maxHeaderSize // Always <= len(incomingBuffer)
 
-	headers := c.request.Headers // Reuse arrays
-	transferEncodings := c.request.TransferEncodings
-	c.request = Request{Headers: headers[:0], TransferEncodings: transferEncodings, ContentLength: -1}
+	headers := c.request.Headers[:0] // Reuse arrays
+	transferEncodings := c.request.TransferEncodings[:0]
+	c.request = Request{Headers: headers, TransferEncodings: transferEncodings, ContentLength: -1}
 	state := METHOD_START
 	for {
 		if incomingReadPos == headerLimit {
