@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -48,6 +49,7 @@ type Client struct {
 	incomingReadPos  int
 	incomingWritePos int
 
+	incomingReader io.Reader
 	outgoingWriter *bufio.Writer
 
 	request Request
@@ -243,7 +245,7 @@ func (c *Client) readRequest() error {
 			return fmt.Errorf("Too big request headers")
 		}
 		if incomingReadPos == incomingWritePos {
-			n, err := c.conn.Read(incomingBuffer[incomingWritePos:])
+			n, err := c.incomingReader.Read(incomingBuffer[incomingWritePos:])
 			if err != nil {
 				return err
 			}
@@ -313,6 +315,7 @@ func (s *Server) ListerAndServer(addr string) error {
 			server:         s,
 			conn:           conn,
 			incomingBuffer: make([]byte, incomingBufferSize),
+			incomingReader: conn,
 			outgoingWriter: bufio.NewWriterSize(conn, outgoingBufferSize),
 		}
 		go client.routine()
@@ -365,11 +368,36 @@ func slow() {
 // naive: 320302     180053    43505
 
 func main() {
+
 	helloCrab := []byte("Hello, Crab!")
 	s := Server{handler: func(wr ResponseWriter, request *Request) {
 		wr.WriteContentLength(12)
 		wr.Write(helloCrab)
 	}}
+	/*
+		writer := bytes.Buffer{}
+		testData := []byte(
+			"POST /post_identity_body_world?q=search#hey HTTP/1.1\r\n" +
+				"Accept: *\r\n" +
+				"Transfer-Encoding: identity\r\n" +
+				"  ,chunked\r\n" +
+				"Alpha: sta\r\n" +
+				" rt\r\n" +
+				"Content-Length: 5\r\n" +
+				"\r\n" +
+				"World")
+
+		c := Client{server: &s,
+			conn:           nil,
+			incomingBuffer: make([]byte, incomingBufferSize),
+			incomingReader: bytes.NewReader(testData),
+			outgoingWriter: bufio.NewWriter(&writer),
+		}
+		err := c.readRequest()
+		if err != nil {
+			log.Fatalf("Error %v", err)
+		}
+	*/
 	_ = s.ListerAndServer(":7003")
 	return
 }

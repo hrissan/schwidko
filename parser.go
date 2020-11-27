@@ -5,23 +5,23 @@ import (
 	"strconv"
 )
 
-func tolower(c byte) byte {
+func toLower(c byte) byte {
 	if 'A' <= c && c <= 'Z' {
 		return c - 'A' + 'a' // Assumptions on character encoding
 	}
 	return c
 }
-func tolowerSlice(data []byte) {
+func toTowerSlice(data []byte) {
 	for i, c := range data {
-		data[i] = tolower(c)
+		data[i] = toLower(c)
 	}
 }
 
-func isdigit(c byte) bool { return c >= '0' && c <= '9' }
-func is_sp(c byte) bool   { return c == ' ' || c == '\t' }
-func is_char(c byte) bool { return c <= 127 }
-func is_ctl(c byte) bool  { return c <= 31 || c == 127 }
-func is_tspecial(c byte) bool {
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }
+func isSP(c byte) bool    { return c == ' ' || c == '\t' }
+func isChar(c byte) bool  { return c <= 127 }
+func isCTL(c byte) bool   { return c <= 31 || c == 127 }
+func isTSpecial(c byte) bool {
 	switch c {
 	case '(':
 		return true
@@ -65,7 +65,7 @@ func is_tspecial(c byte) bool {
 	return false
 }
 
-func from_hex_digit(c byte) int {
+func fromHexDigit(c byte) int {
 	if c >= '0' && c <= '9' {
 		return int(c) - '0'
 	}
@@ -78,34 +78,34 @@ func from_hex_digit(c byte) int {
 	return -1
 }
 
-func parse_content_type_value(value []byte) ([]byte, []byte) {
+func parseContentTypeValue(value []byte) ([]byte, []byte) { // lowercase mime, suffix
 	start := bytes.Index(value, []byte{';', ' ', '\t'})
 	if start < 0 {
-		tolowerSlice(value)
+		toTowerSlice(value)
 		return value, nil
 	}
 	mime := value[:start]
-	tolowerSlice(mime)
-	for start < len(value) && is_sp(value[start]) {
+	toTowerSlice(mime)
+	for start < len(value) && isSP(value[start]) {
 		start++
 	}
 	if start < len(value) && value[start] == ';' {
 		start++ // We simply allow whitespaces instead of ;
 	}
-	for start < len(value) && is_sp(value[start]) {
+	for start < len(value) && isSP(value[start]) {
 		start++
 	}
 	return mime, value[start:]
 }
 
-func parse_authorization_basic(value []byte) []byte {
-	if len(value) < 6 || tolower(value[0]) != 'b' || tolower(value[1]) != 'a' ||
-		tolower(value[2]) != 's' || tolower(value[3]) != 'i' || tolower(value[4]) != 'c' ||
-		!is_sp(value[5]) {
+func parseAuthorizationBasic(value []byte) []byte {
+	if len(value) < 6 || toLower(value[0]) != 'b' || toLower(value[1]) != 'a' ||
+		toLower(value[2]) != 's' || toLower(value[3]) != 'i' || toLower(value[4]) != 'c' ||
+		!isSP(value[5]) {
 		return nil
 	}
 	start := 6
-	for start < len(value) && is_sp(value[start]) {
+	for start < len(value) && isSP(value[start]) {
 		start++
 	}
 	return value[start:]
@@ -173,7 +173,7 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 		if input == '\n' {
 			return METHOD
 		}
-		if !is_char(input) || is_ctl(input) || is_tspecial(input) {
+		if !isChar(input) || isCTL(input) || isTSpecial(input) {
 			c.parseError = "Invalid character at method start"
 			return BAD
 		}
@@ -186,20 +186,20 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 		}
 		return METHOD_START
 	case METHOD:
-		if is_sp(input) {
+		if isSP(input) {
 			c.request.Method = incomingBuffer[c.methodStart:incomingReadPos]
 			return URI_START
 		}
-		if !is_char(input) || is_ctl(input) || is_tspecial(input) {
+		if !isChar(input) || isCTL(input) || isTSpecial(input) {
 			c.parseError = "Invalid character in method"
 			return BAD
 		}
 		return METHOD
 	case URI_START:
-		if is_sp(input) {
+		if isSP(input) {
 			return URI_START
 		}
-		if is_ctl(input) {
+		if isCTL(input) {
 			c.parseError = "Invalid (control) character at uri start"
 			return BAD
 		}
@@ -218,11 +218,11 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 		}
 		return URI
 	case URI:
-		if is_sp(input) {
+		if isSP(input) {
 			c.request.Path = incomingBuffer[c.uriStart:incomingReadPos]
 			return HTTP_VERSION_H
 		}
-		if is_ctl(input) {
+		if isCTL(input) {
 			c.parseError = "Invalid (control) character in uri"
 			return BAD
 		}
@@ -241,11 +241,11 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 		}
 		return URI
 	case URI_SHIFTED:
-		if is_sp(input) {
+		if isSP(input) {
 			c.request.Path = incomingBuffer[c.uriStart:c.uriWritePos]
 			return HTTP_VERSION_H
 		}
-		if is_ctl(input) {
+		if isCTL(input) {
 			c.parseError = "Invalid (control) character in uri"
 			return BAD
 		}
@@ -265,7 +265,7 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 		c.uriWritePos += 1
 		return URI_SHIFTED
 	case URI_PERCENT1:
-		c.percent1_hex_digit = from_hex_digit(input)
+		c.percent1_hex_digit = fromHexDigit(input)
 		if c.percent1_hex_digit < 0 {
 			c.parseError = "URI percent-encoding invalid first hex digit"
 			return BAD
@@ -273,7 +273,7 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 		return URI_PERCENT2
 	case URI_PERCENT2:
 		{
-			digit2 := from_hex_digit(input)
+			digit2 := fromHexDigit(input)
 			if digit2 < 0 {
 				c.parseError = "URI percent-encoding invalid second hex digit"
 				return BAD
@@ -283,11 +283,11 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 			return URI_SHIFTED
 		}
 	case URI_QUERY_STRING:
-		if is_sp(input) {
+		if isSP(input) {
 			c.request.QueryString = incomingBuffer[c.queryStringStart:incomingReadPos]
 			return HTTP_VERSION_H
 		}
-		if is_ctl(input) {
+		if isCTL(input) {
 			c.parseError = "Invalid (control) character in uri"
 			return BAD
 		}
@@ -297,16 +297,16 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 		}
 		return URI_QUERY_STRING
 	case URI_ANCHOR:
-		if is_sp(input) {
+		if isSP(input) {
 			return HTTP_VERSION_H
 		}
-		if is_ctl(input) {
+		if isCTL(input) {
 			c.parseError = "Invalid (control) character in uri"
 			return BAD
 		}
 		return URI_ANCHOR
 	case HTTP_VERSION_H:
-		if is_sp(input) {
+		if isSP(input) {
 			return HTTP_VERSION_H
 		}
 		if input != 'H' {
@@ -339,7 +339,7 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 		}
 		return HTTP_VERSION_MAJOR_START
 	case HTTP_VERSION_MAJOR_START:
-		if !isdigit(input) {
+		if !isDigit(input) {
 			c.parseError = "Invalid http version major start, must be digit"
 			return BAD
 		}
@@ -349,7 +349,7 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 		if input == '.' {
 			return HTTP_VERSION_MINOR_START
 		}
-		if !isdigit(input) {
+		if !isDigit(input) {
 			c.parseError = "Invalid http version major, must be digit"
 			return BAD
 		}
@@ -360,7 +360,7 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 		}
 		return HTTP_VERSION_MAJOR
 	case HTTP_VERSION_MINOR_START:
-		if !isdigit(input) {
+		if !isDigit(input) {
 			c.parseError = "Invalid http version minor start, must be digit"
 			return BAD
 		}
@@ -373,10 +373,10 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 		if input == '\n' {
 			return FIRST_HEADER_LINE_START
 		}
-		if is_sp(input) {
+		if isSP(input) {
 			return STATUS_LINE_CR
 		}
-		if !isdigit(input) {
+		if !isDigit(input) {
 			c.parseError = "Invalid http version minor, must be digit"
 			return BAD
 		}
@@ -387,7 +387,7 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 		}
 		return HTTP_VERSION_MINOR
 	case STATUS_LINE_CR:
-		if is_sp(input) {
+		if isSP(input) {
 			return STATUS_LINE_CR
 		}
 		if input != '\n' {
@@ -409,16 +409,17 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 		if input == '\n' {
 			return GOOD
 		}
-		if !is_char(input) || is_ctl(input) || is_tspecial(input) {
+		if !isChar(input) || isCTL(input) || isTSpecial(input) {
 			c.parseError = "Invalid character at header line start"
 			return BAD
 		}
 		c.headerKeyStart = incomingReadPos
-		incomingBuffer[incomingReadPos] = tolower(input)
+		incomingBuffer[incomingReadPos] = toLower(input)
 		return HEADER_NAME
 	case HEADER_LINE_START:
-		if is_sp(input) {
-			c.headerValueWritePos = incomingReadPos - 1
+		if isSP(input) {
+			incomingBuffer[c.headerValueWritePos] = input
+			c.headerValueWritePos += 1
 			return HEADER_VALUE_CONTINUATION
 		}
 		if !c.processReadyHeader(incomingBuffer) {
@@ -430,31 +431,31 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 		if input == '\n' {
 			return GOOD
 		}
-		if !is_char(input) || is_ctl(input) || is_tspecial(input) {
+		if !isChar(input) || isCTL(input) || isTSpecial(input) {
 			c.parseError = "Invalid character at header line start"
 			return BAD
 		}
 		c.headerKeyStart = incomingReadPos
-		incomingBuffer[incomingReadPos] = tolower(input)
+		incomingBuffer[incomingReadPos] = toLower(input)
 		return HEADER_NAME
 	case HEADER_NAME:
 		// We relax https://tools.ietf.org/html/rfc7230#section-3.2.4
-		if is_sp(input) {
+		if isSP(input) {
 			c.headerKeyFinish = incomingReadPos
 			return HEADER_COLON
 		}
 		if input != ':' {
-			if !is_char(input) || is_ctl(input) || is_tspecial(input) {
+			if !isChar(input) || isCTL(input) || isTSpecial(input) {
 				c.parseError = "Invalid character at header name"
 				return BAD
 			}
-			incomingBuffer[incomingReadPos] = tolower(input)
+			incomingBuffer[incomingReadPos] = toLower(input)
 			return HEADER_NAME
 		}
 		c.headerKeyFinish = incomingReadPos
 		fallthrough
 	case HEADER_COLON:
-		if is_sp(input) {
+		if isSP(input) {
 			return HEADER_COLON
 		}
 		if input != ':' {
@@ -466,7 +467,7 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 		c.headerCMSList = bytes.Compare(key, strConnection) == 0 || bytes.Compare(key, strTransferEncoding) == 0
 		return SPACE_BEFORE_HEADER_VALUE
 	case SPACE_BEFORE_HEADER_VALUE:
-		if is_sp(input) {
+		if isSP(input) {
 			return SPACE_BEFORE_HEADER_VALUE
 		}
 		c.headerValueStart = incomingReadPos
@@ -474,12 +475,14 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 		fallthrough
 	case HEADER_VALUE:
 		if input == '\r' {
+			c.headerValueWritePos = incomingReadPos
 			return HEADER_LF
 		}
 		if input == '\n' {
+			c.headerValueWritePos = incomingReadPos
 			return HEADER_LINE_START
 		}
-		if is_ctl(input) {
+		if isCTL(input) {
 			c.parseError = "Invalid character (control) in header value"
 			return BAD
 		}
@@ -491,7 +494,6 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 			c.headerValueStart = incomingReadPos + 1
 			return SPACE_BEFORE_HEADER_VALUE
 		}
-		c.headerValueWritePos += 1
 		return HEADER_VALUE
 	case HEADER_VALUE_CONTINUATION:
 		if input == '\r' {
@@ -500,7 +502,7 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 		if input == '\n' {
 			return HEADER_LINE_START
 		}
-		if is_ctl(input) {
+		if isCTL(input) {
 			c.parseError = "Invalid character (control) in header value"
 			return BAD
 		}
@@ -533,7 +535,7 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 
 func (c *Client) processReadyHeader(incomingBuffer []byte) bool {
 	// We have no backtracking, so cheat here
-	for c.headerValueWritePos > c.headerValueStart && is_sp(incomingBuffer[c.headerValueWritePos-1]) {
+	for c.headerValueWritePos > c.headerValueStart && isSP(incomingBuffer[c.headerValueWritePos-1]) {
 		c.headerValueWritePos -= 1
 	}
 	key := incomingBuffer[c.headerKeyStart:c.headerKeyFinish]
@@ -556,7 +558,7 @@ func (c *Client) processReadyHeader(incomingBuffer []byte) bool {
 		return true
 	}
 	if bytes.Compare(key, strTransferEncoding) == 0 {
-		tolowerSlice(value)
+		toTowerSlice(value)
 		if bytes.Compare(value, strChunked) == 0 {
 			if len(c.request.TransferEncodings) != 0 {
 				c.parseError = "chunk encoding must be applied last"
@@ -580,11 +582,11 @@ func (c *Client) processReadyHeader(incomingBuffer []byte) bool {
 		return true
 	}
 	if bytes.Compare(key, strContentType) == 0 {
-		c.request.ContentTypeMime, c.request.ContentTypeSuffix = parse_content_type_value(value)
+		c.request.ContentTypeMime, c.request.ContentTypeSuffix = parseContentTypeValue(value)
 		return true
 	}
 	if bytes.Compare(key, strConnection) == 0 {
-		tolowerSlice(value)
+		toTowerSlice(value)
 		if bytes.Compare(value, strClose) == 0 {
 			c.request.KeepAlive = false
 			return true
@@ -601,11 +603,11 @@ func (c *Client) processReadyHeader(incomingBuffer []byte) bool {
 		return false
 	}
 	if bytes.Compare(key, strAuthorization) == 0 {
-		c.request.basicAuthorization = parse_authorization_basic(value)
+		c.request.basicAuthorization = parseAuthorizationBasic(value)
 		return true
 	}
 	if bytes.Compare(key, strUpgrade) == 0 {
-		tolowerSlice(value)
+		toTowerSlice(value)
 		if bytes.Compare(value, strWebSocket) == 0 {
 			c.request.UpgradeWebSocket = true
 			return true
