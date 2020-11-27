@@ -11,17 +11,17 @@ import (
 var queryKeyBytes = []byte("query")
 
 func requestHandler(ctx *fasthttp.RequestCtx) {
-	args := ctx.QueryArgs()
+	//args := ctx.QueryArgs()
 
-	cond := false
-	if queryBytes := args.PeekBytes(queryKeyBytes); queryBytes != nil {
-		cond = true
-	}
-	if cond {
-		_, _ = fmt.Fprintf(ctx, "Hello, Cond!")
-	} else {
-		_, _ = fmt.Fprintf(ctx, "Hello, Crab!")
-	}
+	//cond := false
+	//if queryBytes := args.PeekBytes(queryKeyBytes); queryBytes != nil {
+	//	cond = true
+	//}
+	//if cond {
+	//	_, _ = fmt.Fprintf(ctx, "Hello, Cond!")
+	//} else {
+	_, _ = fmt.Fprintf(ctx, "Hello, Crab!")
+	//}
 	ctx.SetContentType("text/plain; charset=utf-8")
 }
 
@@ -33,24 +33,28 @@ func fast() {
 
 func slow() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		keys, ok := r.URL.Query()["query"]
+		//keys, ok := r.URL.Query()["query"]
 		w.Header().Set("content-type", "text/plain; charset=utf-8")
 
-		if !ok || len(keys) < 1 {
-			w.Write([]byte("Hello, Cond!"))
-			return
-		}
+		//if !ok || len(keys) < 1 {
+		//	w.Write([]byte("Hello, Cond!"))
+		//	return
+		//}
 		w.Write([]byte("Hello, Crab!"))
 	})
 
 	log.Fatal(http.ListenAndServe(":7001", nil))
 }
 
+// gobench -t 20 -c 128 -u http://127.0.0.1:7001/index.html
+// gobench -t 20 -c 128 -u http://127.0.0.1:7002/index.html
+// gobench -t 20 -c 128 -u http://127.0.0.1:7003/index.html
+
 //            Thinkpad  Thinkpad   Macbook Pro
 //              2s         20s       5s
 // net.http:  112336     61513     24829
-// fasthttp:  235335     132181    38148
-// schwidko:  320302     180053    43505
+// fasthttp:  235335     132181    41709
+// schwidko:     ?         ?       44119
 
 func main() {
 	fmt.Println("Runs 3 web servers")

@@ -117,13 +117,6 @@ func (c *Client) WriteStatus(statusCode int) {
 	c.writerState = CONNECTION_EXPECT_HEADERS
 }
 
-//_, _ = wr.WriteString()
-//_, _ = wr.WriteString("server: crab\r\n")
-//_, _ = wr.WriteString("content-type: text/plain; charset=utf-8\r\n")
-//_, _ = wr.WriteString("content-length: 12\r\n")
-//_, _ = wr.WriteString("\r\n")
-//_, _ = wr.WriteString("Hello, Crab!\r\n")
-
 func (c *Client) WriteDate(date string) {
 	if c.writerState == CONNECTION_EXPECT_STATUS {
 		c.WriteStatus(200)
@@ -214,7 +207,7 @@ func (c *Client) Write(data []byte) (int, error) {
 			//c.outgoingWriter.WriteString("date: ")
 			//c.outgoingWriter.Write(dateBuf)
 			//c.outgoingWriter.WriteString("\r\n")
-			c.outgoingWriter.WriteString("date: Tue, 15 Nov 2020 12:45:26 GMT\n\n")
+			c.outgoingWriter.WriteString("date: Tue, 15 Nov 2020 12:45:26 GMT\r\n")
 			c.responseDateWritten = true
 		}
 		if c.responseContentLengthWritten < 0 { // TODO actually support chunked encoding
@@ -305,6 +298,15 @@ func (c *Client) routine() {
 		c.responseContentLengthWritten = -1
 		c.server.handler(c, &c.request)
 		// TODO - additional logic
+		//wr := c.outgoingWriter
+		//_, _ = wr.WriteString("HTTP/1.1 200 OK\r\n")
+		//_, _ = wr.WriteString("server: crab\r\n")
+		//_, _ = wr.WriteString("date: Tue, 15 Nov 2020 12:45:26 GMT\r\n")
+		//_, _ = wr.WriteString("content-type: text/plain; charset=utf-8\r\n")
+		//_, _ = wr.WriteString("content-length: 12\r\n")
+		//_, _ = wr.WriteString("\r\n")
+		//_, _ = wr.WriteString("Hello, Crab!\r\n")
+
 		c.writerState = CONNECTION_NO_WRITE
 		_ = c.outgoingWriter.Flush()
 	}
