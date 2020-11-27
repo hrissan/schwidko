@@ -1,13 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
-	"strconv"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,6 +25,16 @@ type Handler func(wr ResponseWriter, request *Request)
 type Server struct {
 	listener net.Listener
 	handler  Handler
+}
+
+var timeBuffer atomic.Value
+
+func init() {
+	timeBuffer.Store(appendTime(nil, time.Now()))
+	go func() {
+		time.Sleep(time.Millisecond * 500)
+		timeBuffer.Store(appendTime(nil, time.Now()))
+	}()
 }
 
 type HeaderKV struct {
@@ -47,8 +56,10 @@ type Client struct {
 	incomingReadPos  int
 	incomingWritePos int
 
-	incomingReader io.Reader
-	outgoingWriter *bufio.Writer
+	incomingReader   io.Reader
+	outgoingBuffer   []byte
+	outgoingWritePos int
+	//outgoingWriter *bufio.Writer
 
 	request Request
 
@@ -101,19 +112,85 @@ const incomingBufferSize = 4096
 const outgoingBufferSize = 4096
 const maxHeaderSize = 2048
 
+var errOVerflow = errors.New("OVerflow")
+
+func (c *Client) writeString(str string) error {
+	if c.outgoingWritePos+len(str) > len(c.outgoingBuffer) {
+		return errOVerflow
+	}
+	c.outgoingWritePos += copy(c.outgoingBuffer[c.outgoingWritePos:], str)
+	return nil
+}
+
+func (c *Client) write(str []byte) error {
+	if c.outgoingWritePos+len(str) > len(c.outgoingBuffer) {
+		return errOVerflow
+	}
+	c.outgoingWritePos += copy(c.outgoingBuffer[c.outgoingWritePos:], str)
+	return nil
+}
+
+func (c *Client) writeUint(value uint) error {
+	// Use end of buffer as a scratch space.
+	const BUF_SIZE = 128
+
+	if c.outgoingWritePos+BUF_SIZE > len(c.outgoingBuffer) {
+		return errOVerflow
+	}
+	p := len(c.outgoingBuffer)
+
+	//if (std::is_signed<T>::value && value < 0) {
+	//	do {
+	//		buffer[--p] = '0' - (value % 10);
+	//		value /= 10;
+	//	} while (value != 0 && p != 1);  // Last condition turns stack corruption into harmless wrong result
+	//	buffer[--p] = '-';
+	//} else {
+	for {
+		p--
+		c.outgoingBuffer[p] = '0' + byte(value%10)
+		value /= 10
+		if value == 0 || p == 0 {
+			break
+		}
+	}
+	c.outgoingWritePos += copy(c.outgoingBuffer[c.outgoingWritePos:], c.outgoingBuffer[p:])
+	return nil
+}
+
+func (c *Client) flush() error {
+	if c.outgoingWritePos != 0 {
+		_, err := c.conn.Write(c.outgoingBuffer[:c.outgoingWritePos])
+		if err != nil {
+			return err
+		}
+		c.outgoingWritePos = 0
+	}
+	return nil
+}
+
+func (c *Client) writeByte(value byte) error {
+	if c.outgoingWritePos+1 > len(c.outgoingBuffer) {
+		return errOVerflow
+	}
+	c.outgoingBuffer[c.outgoingWritePos] = value
+	c.outgoingWritePos++
+	return nil
+}
+
 func (c *Client) WriteStatus(statusCode int) {
 	if c.writerState != CONNECTION_EXPECT_STATUS {
 		// TODO disconnect
 		return
 	}
-	c.outgoingWriter.WriteString("HTTP/")
-	c.outgoingWriter.WriteString(strconv.Itoa(c.request.VersionMajor))
-	c.outgoingWriter.WriteByte('.')
-	c.outgoingWriter.WriteString(strconv.Itoa(c.request.VersionMinor))
-	c.outgoingWriter.WriteByte(' ')
-	c.outgoingWriter.WriteString(strconv.Itoa(statusCode))
-	c.outgoingWriter.WriteByte(' ')
-	c.outgoingWriter.WriteString("OK\r\n") // TODO depending on status
+	c.writeString("HTTP/")
+	c.writeUint(uint(c.request.VersionMajor))
+	c.writeByte('.')
+	c.writeUint(uint(c.request.VersionMinor))
+	c.writeByte(' ')
+	c.writeUint(uint(statusCode))
+	c.writeByte(' ')
+	c.writeString("OK\r\n") // TODO depending on status
 	c.writerState = CONNECTION_EXPECT_HEADERS
 }
 
@@ -126,9 +203,9 @@ func (c *Client) WriteDate(date string) {
 		return
 	}
 	c.responseDateWritten = true
-	c.outgoingWriter.WriteString("date: ")
-	c.outgoingWriter.WriteString(date)
-	c.outgoingWriter.WriteString("\r\n")
+	c.writeString("date: ")
+	c.writeString(date)
+	c.writeString("\r\n")
 }
 func (c *Client) WriteServer(server string) {
 	if c.writerState == CONNECTION_EXPECT_STATUS {
@@ -139,9 +216,9 @@ func (c *Client) WriteServer(server string) {
 		return
 	}
 	c.responseServerWritten = true
-	c.outgoingWriter.WriteString("server: ")
-	c.outgoingWriter.WriteString(server)
-	c.outgoingWriter.WriteString("\r\n")
+	c.writeString("server: ")
+	c.writeString(server)
+	c.writeString("\r\n")
 }
 func (c *Client) WriteContentLength(length int64) {
 	if c.writerState == CONNECTION_EXPECT_STATUS {
@@ -152,9 +229,9 @@ func (c *Client) WriteContentLength(length int64) {
 		return
 	}
 	c.responseContentLengthWritten = length
-	c.outgoingWriter.WriteString("content-length: ")
-	c.outgoingWriter.WriteString(strconv.Itoa(int(length))) // TODO 64-bit fun
-	c.outgoingWriter.WriteString("\r\n")
+	c.writeString("content-length: ")
+	c.writeUint(uint(int(length))) // TODO 64-bit fun
+	c.writeString("\r\n")
 }
 
 func (c *Client) WriteOtherHeader(key string, value string) {
@@ -165,10 +242,10 @@ func (c *Client) WriteOtherHeader(key string, value string) {
 		// TODO disconnect
 		return
 	}
-	c.outgoingWriter.WriteString(key)
-	c.outgoingWriter.WriteString(": ")
-	c.outgoingWriter.WriteString(value)
-	c.outgoingWriter.WriteString("\r\n")
+	c.writeString(key)
+	c.writeString(": ")
+	c.writeString(value)
+	c.writeString("\r\n")
 }
 
 func appendTime(b []byte, t time.Time) []byte { // Copied from net.http
@@ -198,40 +275,52 @@ func (c *Client) Write(data []byte) (int, error) {
 	}
 	if c.writerState == CONNECTION_EXPECT_HEADERS {
 		if !c.responseServerWritten {
-			c.outgoingWriter.WriteString("server: crab\r\n")
+			c.writeString("server: crab\r\n")
 			c.responseServerWritten = true
 		}
 		if !c.responseDateWritten {
 			// TODO cache in Server
 			//dateBuf := appendTime(nil, time.Now())
-			//c.outgoingWriter.WriteString("date: ")
-			//c.outgoingWriter.Write(dateBuf)
-			//c.outgoingWriter.WriteString("\r\n")
-			c.outgoingWriter.WriteString("date: Tue, 15 Nov 2020 12:45:26 GMT\r\n")
+			c.writeString("date: ")
+			dateBuf := timeBuffer.Load()
+			c.write(dateBuf.([]byte))
+			c.writeString("\r\n")
+			//c.writeString("date: Tue, 15 Nov 2020 12:45:26 GMT\r\n")
 			c.responseDateWritten = true
 		}
 		if c.responseContentLengthWritten < 0 { // TODO actually support chunked encoding
 			log.Fatalf("Chunked body not yet supported")
-			c.outgoingWriter.WriteString("transfer-encoding: chunked\r\n")
+			c.writeString("transfer-encoding: chunked\r\n")
 		}
-		c.outgoingWriter.WriteString("\r\n")
+		c.writeString("\r\n")
 		c.writerState = CONNECTION_EXPECT_BODY
 	}
 	if c.writerState != CONNECTION_EXPECT_BODY {
 		// TODO disconnect
 		return 0, errors.New("Unexpected body write")
 	}
+	origLen := len(data)
 	if c.responseContentLengthWritten >= 0 {
 		if c.responseBytesWritten+int64(len(data)) > c.responseContentLengthWritten {
 			return 0, errors.New("Body overflow")
 		}
-		n, err := c.outgoingWriter.Write(data)
-		c.responseBytesWritten += int64(n)
-		if err != nil {
-			// TODO disconnect
-			return n, err
+		for {
+			if len(data) == 0 {
+				c.responseBytesWritten += int64(origLen)
+				return origLen, nil
+			}
+			copied := copy(c.outgoingBuffer[c.outgoingWritePos:], data)
+			c.outgoingWritePos += copied
+			data = data[copied:]
+			if c.outgoingWritePos == len(c.outgoingBuffer) {
+				_, err := c.conn.Write(c.outgoingBuffer)
+				if err != nil {
+					// TODO disconnect
+					return 0, err
+				}
+				c.outgoingWritePos = 0
+			}
 		}
-		return n, err
 	}
 	log.Fatalf("Chunked body not yet supported")
 	return 0, nil
@@ -308,7 +397,7 @@ func (c *Client) routine() {
 		//_, _ = wr.WriteString("Hello, Crab!\r\n")
 
 		c.writerState = CONNECTION_NO_WRITE
-		_ = c.outgoingWriter.Flush()
+		_ = c.flush()
 	}
 }
 
@@ -328,7 +417,7 @@ func (s *Server) ListerAndServer(addr string) error {
 			conn:           conn,
 			incomingBuffer: make([]byte, incomingBufferSize),
 			incomingReader: conn,
-			outgoingWriter: bufio.NewWriterSize(conn, outgoingBufferSize),
+			outgoingBuffer: make([]byte, outgoingBufferSize),
 		}
 		go client.routine()
 	}

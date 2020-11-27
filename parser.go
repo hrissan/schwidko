@@ -146,22 +146,6 @@ const (
 	BAD                       = iota
 )
 
-var strConnection = []byte("connection")
-var strTransferEncoding = []byte("transfer-encoding")
-var strContentLength = []byte("content-length")
-var strChunked = []byte("chunked")
-var strIdentity = []byte("identity")
-var strHost = []byte("host")
-var strOrigin = []byte("origin")
-var strContentType = []byte("content-type")
-var strClose = []byte("close")
-var strKeepAlive = []byte("keep-alive")
-var strUpgrade = []byte("upgrade")
-var strWebSocket = []byte("websocket")
-var strAuthorization = []byte("authorization")
-var strSecWebSocketKey = []byte("sec-websocket-key")
-var strSecWebSocketVersion = []byte("sec-websocket-version")
-
 func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) int {
 	input := incomingBuffer[incomingReadPos]
 	switch state {
@@ -464,7 +448,7 @@ func (c *Client) consume(incomingBuffer []byte, incomingReadPos int, state int) 
 		}
 		// We will add other comma-separated headers if we need them later
 		key := incomingBuffer[c.headerKeyStart:c.headerKeyFinish]
-		c.headerCMSList = bytes.Compare(key, strConnection) == 0 || bytes.Compare(key, strTransferEncoding) == 0
+		c.headerCMSList = string(key) == "connection" || string(key) == "transfer-encoding"
 		return SPACE_BEFORE_HEADER_VALUE
 	case SPACE_BEFORE_HEADER_VALUE:
 		if isSP(input) {
@@ -544,7 +528,7 @@ func (c *Client) processReadyHeader(incomingBuffer []byte) bool {
 		return true // Empty is NOP in CMS list, like "  ,,keep-alive"
 	}
 	// Those comparisons are by size first so very fast
-	if bytes.Compare(key, strContentLength) == 0 {
+	if string(key) == "content-length" {
 		if c.request.ContentLength >= 0 {
 			c.parseError = "content length specified more than once"
 			return false
@@ -557,9 +541,9 @@ func (c *Client) processReadyHeader(incomingBuffer []byte) bool {
 		c.request.ContentLength = cl
 		return true
 	}
-	if bytes.Compare(key, strTransferEncoding) == 0 {
+	if string(key) == "transfer-encoding" {
 		toTowerSlice(value)
-		if bytes.Compare(value, strChunked) == 0 {
+		if string(value) == "chunked" {
 			if len(c.request.TransferEncodings) != 0 {
 				c.parseError = "chunk encoding must be applied last"
 				return false
@@ -567,59 +551,59 @@ func (c *Client) processReadyHeader(incomingBuffer []byte) bool {
 			c.request.TransferEncodingChunked = true
 			return true
 		}
-		if bytes.Compare(value, strIdentity) == 0 {
+		if string(value) == "identity" {
 			return true // like chunked, it is transparent to user
 		}
 		c.request.TransferEncodings = append(c.request.TransferEncodings, value)
 		return true
 	}
-	if bytes.Compare(key, strHost) == 0 {
+	if string(key) == "host" {
 		c.request.Host = value
 		return true
 	}
-	if bytes.Compare(key, strOrigin) == 0 {
+	if string(key) == "origin" {
 		c.request.Origin = value
 		return true
 	}
-	if bytes.Compare(key, strContentType) == 0 {
+	if string(key) == "content-type" {
 		c.request.ContentTypeMime, c.request.ContentTypeSuffix = parseContentTypeValue(value)
 		return true
 	}
-	if bytes.Compare(key, strConnection) == 0 {
+	if string(key) == "connection" {
 		toTowerSlice(value)
-		if bytes.Compare(value, strClose) == 0 {
+		if string(value) == "close" {
 			c.request.KeepAlive = false
 			return true
 		}
-		if bytes.Compare(value, strKeepAlive) == 0 {
+		if string(value) == "keep-alive" {
 			c.request.KeepAlive = true
 			return true
 		}
-		if bytes.Compare(value, strUpgrade) == 0 {
+		if string(value) == "upgrade" {
 			c.request.ConnectionUpgrade = true
 			return true
 		}
 		c.parseError = "Invalid 'connection' header value"
 		return false
 	}
-	if bytes.Compare(key, strAuthorization) == 0 {
+	if string(key) == "authorization" {
 		c.request.basicAuthorization = parseAuthorizationBasic(value)
 		return true
 	}
-	if bytes.Compare(key, strUpgrade) == 0 {
+	if string(key) == "upgrade" {
 		toTowerSlice(value)
-		if bytes.Compare(value, strWebSocket) == 0 {
+		if string(value) == "websocket" {
 			c.request.UpgradeWebSocket = true
 			return true
 		}
 		c.parseError = "Invalid 'upgrade' header value"
 		return false
 	}
-	if bytes.Compare(key, strSecWebSocketKey) == 0 {
+	if string(key) == "sec-websocket-key" {
 		c.request.SecWebsocketKey = value
 		return true
 	}
-	if bytes.Compare(key, strSecWebSocketVersion) == 0 {
+	if string(key) == "sec-websocket-version" {
 		c.request.SecWebsocketVersion = value
 		return true
 	}
