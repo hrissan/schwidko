@@ -1,8 +1,8 @@
 package main
 
 import (
+	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -82,6 +82,9 @@ type Client struct {
 	responseServerWritten        bool
 	responseContentLengthWritten int64
 	responseBytesWritten         int64
+
+	// Debug
+	noncompleteCounter int
 }
 
 type Request struct {
@@ -96,7 +99,7 @@ type Request struct {
 	Host               []byte
 	ContentTypeMime    []byte
 	ContentTypeSuffix  []byte
-	basicAuthorization []byte
+	BasicAuthorization []byte
 
 	TransferEncodings       [][]byte
 	TransferEncodingChunked bool
@@ -111,6 +114,7 @@ type Request struct {
 const incomingBufferSize = 4096
 const outgoingBufferSize = 4096
 const maxHeaderSize = 2048
+const eofheaderGuardSize = 2
 
 var errOVerflow = errors.New("OVerflow")
 
@@ -326,40 +330,153 @@ func (c *Client) Write(data []byte) (int, error) {
 	return 0, nil
 }
 
-func (c *Client) readRequest() error {
-	incomingBuffer := c.incomingBuffer
-	incomingReadPos := c.incomingReadPos
-	incomingWritePos := c.incomingWritePos
-	if incomingReadPos == incomingWritePos {
-		// If possible, start reading from the buffer beginning
-		incomingReadPos = 0
-		incomingWritePos = 0
+func (c *Client) complete(rp int, wp int) bool {
+	ib := c.incomingBuffer
+	if wp > rp+maxHeaderSize {
+		wp = rp + maxHeaderSize // Do not look beyond maxHeaderSize
 	}
-	if incomingReadPos+maxHeaderSize > len(incomingBuffer) {
-		// Inplace fragments cannot be circular, if in doubt, defragment
-		incomingWritePos = copy(incomingBuffer[incomingReadPos:incomingWritePos], incomingBuffer)
-		incomingReadPos = 0
-	}
-	headerLimit := incomingReadPos + maxHeaderSize // Always <= len(incomingBuffer)
 
-	headers := c.request.Headers[:0] // Reuse arrays
-	transferEncodings := c.request.TransferEncodings[:0]
-	c.request = Request{Headers: headers, TransferEncodings: transferEncodings, ContentLength: -1}
-	state := METHOD_START
+	for rp < wp {
+		np := bytes.IndexByte(ib[rp:wp], '\n')
+		if np < 0 {
+			// xxxx
+			return false
+		}
+		np += rp
+		if np+2 < wp {
+			// xxxxNxy
+			if ib[np+1] == '\n' {
+				// xxxxNNy
+				return true
+			}
+			if ib[np+1] == '\r' && ib[np+2] == '\n' {
+				// xxxxNRN
+				return true
+			}
+			rp = np + 2
+			continue
+		}
+		if np+2 == wp {
+			// xxxxNx
+			if ib[wp+1] == '\n' {
+				// xxxxNN
+				return true
+			}
+			return false
+		}
+		return false
+	}
+	return false
+	/*
+		ret_cnt := 0
+		for rp < wp {
+			input := ib[rp]
+			if input != '\r' && input != '\n' {
+				rp++
+				ret_cnt = 0
+				continue
+			}
+			if input == '\n' {
+				rp++
+				ret_cnt++
+			} else {
+				rp++
+				input2 := ib[rp]
+				if input2 != '\n' {
+					return false // malformed
+				}
+				rp++
+				ret_cnt++
+			}
+			if ret_cnt == 2 {
+				return true
+			}
+		}
+		return false */
+}
+
+func (c *Client) readComplete() error {
+	incomingBuffer := c.incomingBuffer
+	//incomingReadPos := c.incomingReadPos
+	//incomingWritePos := c.incomingWritePos
+	if c.incomingReadPos == c.incomingWritePos {
+		// If possible, start reading from the buffer beginning
+		c.incomingReadPos = 0
+		c.incomingWritePos = 0
+		//  []xxxxxx
+	} else {
+		//  xxx[xxxxxxxx]xxxxx
+		//     [     ] <- maxHeaderSize
+		if c.complete(c.incomingReadPos, c.incomingWritePos) {
+			// do not care if it is at the end of buffer if it is complete
+			return nil
+		}
+		if c.incomingWritePos >= c.incomingReadPos+maxHeaderSize {
+			return errors.New("Incomplete header of max size")
+		}
+		if c.incomingReadPos+maxHeaderSize > len(incomingBuffer) {
+			// Inplace fragments cannot be circular, if in doubt, defragment
+			c.incomingWritePos = copy(incomingBuffer[c.incomingReadPos:c.incomingWritePos], incomingBuffer)
+			c.incomingReadPos = 0
+		}
+	}
+	// Here buffer is always checked for completeness, incomplete and less than maxHeaderSize
+	// xxx[ccccc]xxxxx  // c is checked for completeness
+
 	for {
-		if incomingReadPos == headerLimit {
-			return fmt.Errorf("Too big request headers")
+		n, err := c.incomingReader.Read(c.incomingBuffer[c.incomingWritePos:])
+		if err != nil {
+			return err
 		}
-		if incomingReadPos == incomingWritePos {
-			n, err := c.incomingReader.Read(incomingBuffer[incomingWritePos:])
-			if err != nil {
-				return err
-			}
-			if n == 0 {
-				continue // TODO can this happen? Why?
-			}
-			incomingWritePos += n
+		if n == 0 {
+			log.Panicf("connection Read returned 0 bytes for slice of %d..%d bytes", c.incomingWritePos, len(c.incomingBuffer))
 		}
+		// xxx[cccccnnnnn]xxxxx  // c is checked for completeness, n is not
+		checkFrom := c.incomingWritePos
+		if checkFrom < c.incomingReadPos+3 {
+			checkFrom = c.incomingReadPos
+		}
+		c.incomingWritePos += n
+		if c.complete(checkFrom, c.incomingWritePos) {
+			return nil
+		}
+		if c.incomingWritePos >= c.incomingReadPos+maxHeaderSize {
+			return errors.New("Incomplete header of max size")
+		}
+	}
+}
+
+func (c *Client) readRequest() error {
+	//headers := c.request.Headers[:0] // Reuse arrays
+	//transferEncodings := c.request.TransferEncodings[:0]
+	//c.request = Request{Headers: headers, TransferEncodings: transferEncodings, ContentLength: -1}
+	r := &c.request
+	r.Method = nil
+	r.Path = nil
+	r.QueryString = nil
+	r.ContentLength = -1
+	r.Origin = nil
+	r.Host = nil
+	r.ContentTypeMime = nil
+	r.ContentTypeSuffix = nil
+	r.BasicAuthorization = nil
+
+	r.TransferEncodings = r.TransferEncodings[:0]
+	r.TransferEncodingChunked = false
+	r.Headers = r.Headers[:0]
+
+	r.ConnectionUpgrade = false
+	r.UpgradeWebSocket = false
+	r.SecWebsocketKey = nil
+	r.SecWebsocketVersion = nil
+
+	if err := c.readComplete(); err != nil {
+		return err
+	}
+	state := METHOD_START
+	incomingReadPos := c.incomingReadPos
+	incomingBuffer := c.incomingBuffer
+	for {
 		state = c.consume(incomingBuffer, incomingReadPos, state)
 		if state == GOOD {
 			break
@@ -370,7 +487,6 @@ func (c *Client) readRequest() error {
 		incomingReadPos++
 	}
 	c.incomingReadPos = incomingReadPos
-	c.incomingWritePos = incomingWritePos
 	return nil
 }
 

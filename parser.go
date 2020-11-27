@@ -528,8 +528,9 @@ func (c *Client) processReadyHeader(incomingBuffer []byte) bool {
 		return true // Empty is NOP in CMS list, like "  ,,keep-alive"
 	}
 	// Those comparisons are by size first so very fast
+	r := &c.request
 	if string(key) == "content-length" {
-		if c.request.ContentLength >= 0 {
+		if r.ContentLength >= 0 {
 			c.parseError = "content length specified more than once"
 			return false
 		}
@@ -538,75 +539,75 @@ func (c *Client) processReadyHeader(incomingBuffer []byte) bool {
 			c.parseError = "Content length is not a number"
 			return false
 		}
-		c.request.ContentLength = cl
+		r.ContentLength = cl
 		return true
 	}
 	if string(key) == "transfer-encoding" {
 		toTowerSlice(value)
 		if string(value) == "chunked" {
-			if len(c.request.TransferEncodings) != 0 {
+			if len(r.TransferEncodings) != 0 {
 				c.parseError = "chunk encoding must be applied last"
 				return false
 			}
-			c.request.TransferEncodingChunked = true
+			r.TransferEncodingChunked = true
 			return true
 		}
 		if string(value) == "identity" {
 			return true // like chunked, it is transparent to user
 		}
-		c.request.TransferEncodings = append(c.request.TransferEncodings, value)
+		r.TransferEncodings = append(r.TransferEncodings, value)
 		return true
 	}
 	if string(key) == "host" {
-		c.request.Host = value
+		r.Host = value
 		return true
 	}
 	if string(key) == "origin" {
-		c.request.Origin = value
+		r.Origin = value
 		return true
 	}
 	if string(key) == "content-type" {
-		c.request.ContentTypeMime, c.request.ContentTypeSuffix = parseContentTypeValue(value)
+		r.ContentTypeMime, r.ContentTypeSuffix = parseContentTypeValue(value)
 		return true
 	}
 	if string(key) == "connection" {
 		toTowerSlice(value)
 		if string(value) == "close" {
-			c.request.KeepAlive = false
+			r.KeepAlive = false
 			return true
 		}
 		if string(value) == "keep-alive" {
-			c.request.KeepAlive = true
+			r.KeepAlive = true
 			return true
 		}
 		if string(value) == "upgrade" {
-			c.request.ConnectionUpgrade = true
+			r.ConnectionUpgrade = true
 			return true
 		}
 		c.parseError = "Invalid 'connection' header value"
 		return false
 	}
 	if string(key) == "authorization" {
-		c.request.basicAuthorization = parseAuthorizationBasic(value)
+		r.BasicAuthorization = parseAuthorizationBasic(value)
 		return true
 	}
 	if string(key) == "upgrade" {
 		toTowerSlice(value)
 		if string(value) == "websocket" {
-			c.request.UpgradeWebSocket = true
+			r.UpgradeWebSocket = true
 			return true
 		}
 		c.parseError = "Invalid 'upgrade' header value"
 		return false
 	}
 	if string(key) == "sec-websocket-key" {
-		c.request.SecWebsocketKey = value
+		r.SecWebsocketKey = value
 		return true
 	}
 	if string(key) == "sec-websocket-version" {
-		c.request.SecWebsocketVersion = value
+		r.SecWebsocketVersion = value
 		return true
 	}
-	c.request.Headers = append(c.request.Headers, HeaderKV{key: key, value: value})
+	r.Headers = append(r.Headers, HeaderKV{key: key, value: value})
 	return true
 }
