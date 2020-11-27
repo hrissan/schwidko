@@ -210,10 +210,11 @@ func (c *Client) Write(data []byte) (int, error) {
 		}
 		if !c.responseDateWritten {
 			// TODO cache in Server
-			dateBuf := appendTime(nil, time.Now())
-			c.outgoingWriter.WriteString("date: ")
-			c.outgoingWriter.Write(dateBuf)
-			c.outgoingWriter.WriteString("\r\n")
+			//dateBuf := appendTime(nil, time.Now())
+			//c.outgoingWriter.WriteString("date: ")
+			//c.outgoingWriter.Write(dateBuf)
+			//c.outgoingWriter.WriteString("\r\n")
+			c.outgoingWriter.WriteString("date: Tue, 15 Nov 2020 12:45:26 GMT\n\n")
 			c.responseDateWritten = true
 		}
 		if c.responseContentLengthWritten < 0 { // TODO actually support chunked encoding

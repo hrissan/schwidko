@@ -26,10 +26,9 @@ func requestHandler(ctx *fasthttp.RequestCtx) {
 }
 
 func fast() {
-	if err := fasthttp.ListenAndServe("0.0.0.0:7003", requestHandler); err != nil {
+	if err := fasthttp.ListenAndServe(":7002", requestHandler); err != nil {
 		log.Fatalf("Error in ListenAndServe: %s", err)
 	}
-
 }
 
 func slow() {
@@ -44,16 +43,20 @@ func slow() {
 		w.Write([]byte("Hello, Crab!"))
 	})
 
-	log.Fatal(http.ListenAndServe(":7003", nil))
+	log.Fatal(http.ListenAndServe(":7001", nil))
 }
 
-//       Thinkpad  Thinkpad   Macbook Pro
-//          2s         20s       5s
-// fast:  235335     132181    38148
-// slow:  112336     61513     24829
-// naive: 320302     180053    43505
+//            Thinkpad  Thinkpad   Macbook Pro
+//              2s         20s       5s
+// net.http:  112336     61513     24829
+// fasthttp:  235335     132181    38148
+// schwidko:  320302     180053    43505
 
 func main() {
+	fmt.Println("Runs 3 web servers")
+	fmt.Println(" net.http: port 7001")
+	fmt.Println(" fasthttp: port 7002")
+	fmt.Println(" schwidko: port 7003")
 
 	helloCrab := []byte("Hello, Crab!")
 	s := Server{handler: func(wr ResponseWriter, request *Request) {
@@ -61,6 +64,12 @@ func main() {
 		wr.WriteContentLength(12)
 		wr.Write(helloCrab)
 	}}
-	_ = s.ListerAndServer(":7003")
-	return
+	go func() {
+		err := s.ListerAndServer(":7003")
+		if err != nil {
+			log.Fatalf("Cannot run schwidko, %v", err)
+		}
+	}()
+	go fast()
+	slow()
 }
