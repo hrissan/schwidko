@@ -9,6 +9,7 @@ import (
 )
 
 var queryKeyBytes = []byte("query")
+var helloCrab = []byte("Hello, Crab!")
 
 func requestHandler(ctx *fasthttp.RequestCtx) {
 	//args := ctx.QueryArgs()
@@ -20,7 +21,8 @@ func requestHandler(ctx *fasthttp.RequestCtx) {
 	//if cond {
 	//	_, _ = fmt.Fprintf(ctx, "Hello, Cond!")
 	//} else {
-	_, _ = fmt.Fprintf(ctx, "Hello, Crab!")
+	_, _ = ctx.Write(helloCrab)
+	//_, _ = fmt.Fprintf(ctx, "Hello, Crab!")
 	//}
 	ctx.SetContentType("text/plain; charset=utf-8")
 }
@@ -40,7 +42,7 @@ func slow() {
 		//	w.Write([]byte("Hello, Cond!"))
 		//	return
 		//}
-		w.Write([]byte("Hello, Crab!"))
+		_, _ = w.Write(helloCrab)
 	})
 
 	log.Fatal(http.ListenAndServe(":7001", nil))
@@ -53,8 +55,8 @@ func slow() {
 //            Thinkpad  Thinkpad   Macbook Pro
 //              2s         20s       5s
 // net.http:  112336     61513     24829
-// fasthttp:  235335     132181    41709
-// schwidko:     ?         ?       44119
+// fasthttp:  235335     132181    43612
+// schwidko:     ?         ?       44699
 
 func main() {
 	fmt.Println("Runs 3 web servers")
@@ -62,7 +64,6 @@ func main() {
 	fmt.Println(" fasthttp: port 7002")
 	fmt.Println(" schwidko: port 7003")
 
-	helloCrab := []byte("Hello, Crab!")
 	s := Server{handler: func(wr ResponseWriter, request *Request) {
 		wr.WriteOtherHeader("content-type", "text/plain; charset=utf-8")
 		wr.WriteContentLength(12)
